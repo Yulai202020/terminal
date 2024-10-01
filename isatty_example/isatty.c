@@ -4,8 +4,8 @@
 
 int main() {
     if (isatty(0)) {
-        printf("TERMINAL!\n");
+        printf("Terminal!\n");
     } else {
-        printf("FUCK!\n");
+        printf("No terminal!\n");
     }
 }

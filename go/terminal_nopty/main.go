@@ -11,7 +11,7 @@ import (
 	"github.com/chzyer/readline"
 )
 
-const LogFile = "log_go.txt"
+const LogFile = "log.txt"
 
 func runCommand(command string, args ...string) (string, string, error) {
 	cmd := exec.Command(command, args...)

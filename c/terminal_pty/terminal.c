@@ -17,7 +17,7 @@
 
 #include <yulai/string.h>
 
-#define LOG_FILE "log_c_nopty.txt"
+#define LOG_FILE "log.txt"
 
 char* replace_envs(const char* original) {
     size_t size = strlen(original);
@@ -120,15 +120,11 @@ void run_as_pty(const char* command) {
     int master_fd, slave_fd;
     pid_t pid;
     struct termios orig_termios;
-    int fds[2];
 
-    if (pipe(fds) == -1) {
+    if (openpty(&master_fd, &slave_fd, NULL, NULL, NULL) == -1) {
         perror("openpty");
         exit(EXIT_FAILURE);
     }
-
-    master_fd = fds[0];
-    slave_fd = fds[1];
 
     pid = fork();
     if (pid == -1) {
