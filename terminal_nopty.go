@@ -3,14 +3,12 @@ package main
 import (
 	"bytes"
 	"fmt"
-	// "io"
-    "os"
+	"os"
 	"os/exec"
-	"time"
-    "github.com/chzyer/readline"
 	"strings"
+	"time"
 
-	// "github.com/creack/pty"
+	"github.com/chzyer/readline"
 )
 
 const LogFile = "log_go.txt"
@@ -19,10 +17,12 @@ func runCommand(command string, args ...string) (string, string, error) {
 	cmd := exec.Command(command, args...)
 
 	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
 
 	done := make(chan error)
 	go func() {
-		done <- cmd.Wait()
+		done <- cmd.Run()
 	}()
 
 	select {
@@ -39,20 +39,19 @@ func runCommand(command string, args ...string) (string, string, error) {
 }
 
 func getpwd() (string, error) {
-    cwd, err := os.Getwd()
-    if err != nil {
-        return "", err
-    }
-
-    return cwd, err
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return cwd, nil
 }
 
-func chdir(newDir string) (error) {
-    err := os.Chdir(newDir)
-    if err != nil {
-        fmt.Println("Error on chdir:", err);
-    }
-    return err
+func chdir(newDir string) error {
+	err := os.Chdir(newDir)
+	if err != nil {
+		return fmt.Errorf("Error on chdir: %w", err)
+	}
+	return nil
 }
 
 func commandExists(command string) bool {
@@ -61,88 +60,78 @@ func commandExists(command string) bool {
 }
 
 func main() {
-    for {
-        // init readline
-        cwd, err := getpwd();
-        rl, err := readline.New(cwd + "> ");
+	cwd, err := getpwd()
+	if err != nil {
+		fmt.Println("Error getting current directory:", err)
+		return
+	}
 
-    
-        if err != nil {
-            fmt.Println("Error creating readline instance:", err)
-            return;
-        }
-    
-        defer rl.Close();
+	file, err := os.OpenFile(LogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Println("Error opening log file:", err)
+		return
+	}
+	defer file.Close()
 
-        // get input
-		line, err := rl.Readline();
+	for {
+		rl, err := readline.New(cwd + "> ")
+		if err != nil {
+			fmt.Println("Error creating readline instance:", err)
+			return
+		}
+		defer rl.Close()
 
+		line, err := rl.Readline()
 		if err != nil {
 			if err == readline.ErrInterrupt {
-                continue;
+				continue
 			}
-
 			fmt.Println("Error reading line:", err)
 			return
 		}
 
-        // check is variable line is not empty
-        line = strings.TrimSpace(line) // Remove leading and trailing whitespace
+		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
 
-        // split command
-        parts := strings.Split(line, " ")
-        command := parts[0];
-        args := strings.Join(parts[1:], " ");
+		parts := strings.Split(line, " ")
+		command := parts[0]
+		args := parts[1:]
 
-        // if exit, exit from program
 		if line == "exit" {
 			break
-		} else if parts[0] == "cd" {
-            err := chdir(args);
-
-            if (err != nil) {
-                fmt.Printf("cd error: %s\n", err)
-                break;
-            }
-
-            continue
-        }
-
-        if (!commandExists(command)) {
-            fmt.Println("Command doesnt exist!");
-            continue
-        }
-
-        // open file (log anythink)
-        file, err := os.OpenFile(LogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-        if err != nil {
-            fmt.Println("Error opening log file:", err)
-            return
-        }
-        defer file.Close() 
-
-        // write command
-        _, err = file.WriteString("Command: "+line+"\n");
-
-		if err != nil {
-			fmt.Printf("Error on writing to log file: %v\n", err);
+		} else if command == "cd" {
+			err := chdir(strings.Join(args, " "))
+			if err != nil {
+				fmt.Printf("cd error: %s\n", err)
+			}
+			continue
 		}
 
-        // get output of command
-		output, errOutput, err := runCommand(command, parts[1:]...);
-
-        // write to file output
-        _, err = file.WriteString(output+"===================\n")
-
-		if err != nil {
-			fmt.Printf("Error on writing to log file: %v\n", err);
+		if !commandExists(command) {
+			fmt.Println("Command doesn't exist!")
+			continue
 		}
 
-        // finally print output with stderr
-        fmt.Print(output);
-        fmt.Print(errOutput);
+		_, err = file.WriteString("Command: " + line + "\n")
+		if err != nil {
+			fmt.Printf("Error writing to log file: %v\n", err)
+		}
+
+		output, errOutput, err := runCommand(command, args...)
+		if err != nil {
+			fmt.Printf("Error executing command: %v\n", err)
+		}
+
+		_, err = file.WriteString(output + "===================\n")
+		if err != nil {
+			fmt.Printf("Error writing to log file: %v\n", err)
+		}
+
+		fmt.Print(output)
+		if errOutput != "" {
+			fmt.Print(errOutput)
+		}
 	}
 }
