@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "mustach.h": "c",
+        "stdio.h": "c"
+    }
+}

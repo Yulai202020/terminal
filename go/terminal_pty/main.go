@@ -1,51 +1,81 @@
 package main
 
 import (
-	"bytes"
-	"fmt"
-	"io"
+    "io"
     "os"
-	"os/exec"
-	"time"
-    "github.com/chzyer/readline"
+    "fmt"
+    "sync"
+    "os/exec"
 	"strings"
 
-	"github.com/creack/pty"
+    "golang.org/x/term"
+    "github.com/creack/pty"
+    "github.com/chzyer/readline"
 )
 
 const LogFile = "log.txt"
+var IgnoreList = []string{"vim", "nano", "nvim", "vi"}
 
-func runCommand(command string, args ...string) (string, string, error) {
-	cmd := exec.Command(command, args...)
+func isInIgnoreList(item string) bool {
+    for _, ignoreItem := range IgnoreList {
+        if ignoreItem == item {
+            return true
+        }
+    }
+    return false
+}
 
-	var outBuf, errBuf bytes.Buffer
+func runCommand(command string, args ...string) {
+    logFile, err := os.OpenFile(LogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+    if err != nil {
+        fmt.Println("Error opening log file:", err)
+        return
+    }
+    defer logFile.Close()
 
-	pty, err := pty.Start(cmd)
-	if err != nil {
-		return "", "", err
-	}
-	defer pty.Close()
+    var multiWriter io.Writer
+    if isInIgnoreList(command) {
+        multiWriter = io.MultiWriter(os.Stdout)
+    } else {
+        multiWriter = io.MultiWriter(os.Stdout, logFile)
+    }
 
-	go func() {
-		io.Copy(&outBuf, pty)
-	}()
+    cmd := exec.Command(command, args...)
+    ptmx, err := pty.Start(cmd)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error starting command: %v\n", err)
+        return
+    }
+    defer ptmx.Close()
 
-	done := make(chan error)
-	go func() {
-		done <- cmd.Wait()
-	}()
+    oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error setting terminal to raw mode: %v\n", err)
+        return
+    }
+    defer term.Restore(int(os.Stdin.Fd()), oldState)
 
-	select {
-	case err := <-done:
-		if err != nil {
-			return outBuf.String(), errBuf.String(), err
-		}
-	case <-time.After(5 * time.Second):
-		cmd.Process.Kill()
-		return outBuf.String(), errBuf.String(), fmt.Errorf("command timed out")
-	}
+    var wg sync.WaitGroup
+    wg.Add(1)
 
-	return outBuf.String(), errBuf.String(), nil
+    go func() {
+        defer wg.Done()
+        _, _ = io.Copy(multiWriter, ptmx)
+    }()
+
+    // Copy from stdin to ptmx
+    go func() {
+        _, _ = io.Copy(ptmx, os.Stdin)
+    }()
+
+    // Wait for command to finish
+    err = cmd.Wait()
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Command finished with error: %v\n", err)
+    }
+
+    // Wait for the output goroutine to finish
+    wg.Wait()
 }
 
 func getpwd() (string, error) {
@@ -71,6 +101,7 @@ func commandExists(command string) bool {
 }
 
 func main() {
+    // whi
     for {
         // init readline
         cwd, err := getpwd();
@@ -128,12 +159,12 @@ func main() {
 
         // open file (log anythink)
         file, err := os.OpenFile(LogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+
         if err != nil {
             fmt.Println("Error opening log file:", err)
             return
         }
-        defer file.Close() 
-
+        
         // write command
         _, err = file.WriteString("Command: "+line+"\n");
 
@@ -141,18 +172,25 @@ func main() {
 			fmt.Printf("Error on writing to log file: %v\n", err);
 		}
 
-        // get output of command
-		output, errOutput, err := runCommand(command, parts[1:]...);
+        file.Close()
 
-        // write to file output
-        _, err = file.WriteString(output+"===================\n")
+        // i close and open cuz runCommand also opens this file so its can break
+
+        // get output of command
+		runCommand(command, parts[1:]...);
+
+        file, err = os.OpenFile(LogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+        if err != nil {
+            fmt.Println("Error opening log file:", err)
+            return
+        }
+
+        _, err = file.WriteString("===================\n")
 
 		if err != nil {
 			fmt.Printf("Error on writing to log file: %v\n", err);
 		}
 
-        // finally print output with stderr
-        fmt.Print(output);
-        fmt.Print(errOutput);
+        file.Close();
 	}
 }
